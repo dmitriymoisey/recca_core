@@ -1,7 +1,8 @@
 import numpy as np
 from numba import jit
-import recca_io.write as write
 from tqdm import tqdm
+import utils.constants as const
+
 
 class CellularAutomaton:
     """
@@ -15,7 +16,7 @@ class CellularAutomaton:
         self.cell_number_z = cell_number_z  # кол-во элементов вдоль оси Z
         self.cell_size = cell_size  # размер элемента (м)
         self.number_of_cells = int(cell_number_x * cell_number_y * cell_number_z)  # общее число элементов
-
+        self.actual_number_of_grains = 0
         # массив тройных индексов для каждого элемента
         print('Calculation triple indices for each element ...')
         self.triple_indexes = self.calc_triple_indexes()
@@ -60,6 +61,9 @@ class CellularAutomaton:
         self.density = np.ones(self.number_of_cells, dtype=np.float64)
 
         self.rasorientation_angles = np.ones((self.number_of_cells, 26), dtype=np.float64)
+
+        self.prev_dislocation_density = np.zeros(self.number_of_cells, dtype=np.float64)
+        self.current_dislocation_density = np.zeros(self.number_of_cells, dtype=np.float64)
 
     @jit
     def calc_triple_indexes(self):
@@ -237,18 +241,7 @@ class CellularAutomaton:
         """
         return self.cell_size ** 2
 
-    @jit
-    def set_material(self, material):
-        """
-        Метод для задания материала клеточного автомата
-        """
-        self.heat_expansion_coefficient = self.heat_expansion_coefficient * material.HEAT_EXPANSION_COEFF
-        self.heat_capacity = self.heat_capacity * material.HEAT_CAPACITY
-        self.thermal_conductivity = self.thermal_conductivity * material.HEAT_CONDUCTIVITY
-        self.phonon_portion = self.phonon_portion * material.PHONON_PORTION
-        self.density = self.density * material.DENSITY
-
-    def create_grain_structure(self, number_of_grains, angle_range):
+    def create_grain_structure(self, number_of_grains, angle_range, is_stochastic):
         """
         Метод для моделирования роста зеренной структуры
         """
@@ -256,25 +249,35 @@ class CellularAutomaton:
         f_max = 1.0  # параметр регулирующий скорость роста зерен из зародешей
         grain_index = 1  # начальный индекс зерна
 
-        # вероятность становления зародышем элемента
-        probability_of_nucleation = float(number_of_grains / self.number_of_cells)
+        if is_stochastic:
+            # вероятность становления зародышем элемента
+            probability_of_nucleation = float(number_of_grains / self.number_of_cells)
+            # в цикле по всем активным элементам
+            for global_id in range(self.number_of_cells):
+                current_element_random_num = np.random.random()  # генерируем случайной число [0,1]
+                # если данное число попадает в заданный промежуток, то данный элемент становиться зародышем нового зерна
+                if 0.5 - probability_of_nucleation / 2.0 < current_element_random_num < 0.5 + probability_of_nucleation / 2.0:
+                    # для элемента который стал зародышем нового зерна
+                    self.prev_states[global_id] = 1  # задаем состояние 1
+                    self.prev_grain_indeces[global_id] = grain_index  # и присваем индекс зерна
+                    grain_index += 1
+            self.actual_number_of_grains = grain_index
 
-        # в цикле по всем активным элементам
-        for global_id in range(self.number_of_cells):
-            current_element_random_num = np.random.random()  # генерируем случайной число [0,1]
-            # если данное число попадает в заданный промежуток, то данный элемент становиться зародышем нового зерна
-            if 0.5 - probability_of_nucleation / 2.0 < current_element_random_num < 0.5 + probability_of_nucleation / 2.0:
-                # для элемента который стал зародышем нового зерна
-                self.prev_states[global_id] = 1  # задаем состояние 1
-                self.prev_grain_indeces[global_id] = grain_index  # и присваем индекс зерна
+        else:
+            probabilites = np.empty(self.number_of_cells, dtype=np.float64)
+            for global_id in range(self.number_of_cells):
+                probabilites[global_id] = np.random.random()
+
+            indices = np.argpartition(probabilites, -number_of_grains)[-number_of_grains:]
+
+            for i in indices:
+                self.prev_grain_indeces[i] = grain_index
                 grain_index += 1
+            self.actual_number_of_grains = grain_index
 
-        self.actual_number_of_grains = grain_index
-
-        print(f'Number of Grains {grain_index}')
+        print(f'Number of Grains {grain_index - 1}')
         print('The creation of grain structure: START...')
 
-        neighbor_grain_indices = np.zeros(26, dtype=np.int32)  # индексы зерен соседних элементов
         counter = 0  # счетчик итераций, росто зеренной структуры
 
         while 0 in self.prev_states:  # до тех пор, пока в автомате есть элемент с состоянием 0
@@ -299,7 +302,6 @@ class CellularAutomaton:
                             neighbors_states.append(self.prev_states[neighbor_global_index])
                             neighbor_grain_indices.append(self.prev_grain_indeces[neighbor_global_index])
 
-                    neighbors_states = np.array(neighbors_states)
                     neighbor_grain_indices = np.array(neighbor_grain_indices)
 
                     # находим зерна с индексом на 1-й координационной сфере
@@ -327,10 +329,6 @@ class CellularAutomaton:
                         vector_function_modulus = np.linalg.norm(vector_function)
 
                         x = np.random.random()
-                        # print(f'F = {vector_function_modulus}')
-                        # print(f'Grain Index : {grain_index}')
-                        # print(f'Radius Vectors : {radius_vectors_}')
-                        # print(f'Neighbor state : {states_}')
                         # если случайно сгенерированное число попадает в заданным промежуток то элемент
                         # присоединяется к зерну
                         if (0.5 - vector_function_modulus / 2.0 / f_max) < x < (
@@ -354,13 +352,12 @@ class CellularAutomaton:
 
             print(f'Iteration #: {counter}')
 
-        file_name = input('Save file:')
-        if not file_name == 'no':
-            write.create_file(file_name, self.location_type, self.grain_indeces, self.x_coords, self.y_coords,
-                              self.z_coords)
-
         self.configure_crystal_lattice(self.actual_number_of_grains, angle_range)
         self.rasorientation_angles = self.get_rasorientation_angles()
+        self.prev_dislocation_density = self.get_dislocation_density(number_of_grains=self.actual_number_of_grains,
+                                                                     min_value=1.0e+13,
+                                                                     deviation=1.0e+5)
+        self.current_dislocation_density[:] = self.prev_dislocation_density[:]
 
     def calculate_vector_function(self, neighbors_states, radius_vectors):
         """
@@ -451,117 +448,125 @@ class CellularAutomaton:
 
         return rv
 
-    def recrystallization_simulation(self, average_dislocation_density, dislocation_deviation, temperature):
+    @jit
+    def get_dislocation_density(self, number_of_grains, min_value, deviation):
+        current_dislocation_density = np.zeros(self.number_of_cells, dtype=np.float64)
+        random_numbers = np.zeros(number_of_grains, dtype=np.float64)
+        for i in range(number_of_grains):
+            random_numbers[i] = np.random.random()
+        for index, grain in enumerate(self.grain_indeces):
+            current_dislocation_density[index] = min_value + deviation * random_numbers[grain]
+        return current_dislocation_density
+
+    def recrystallization_simulation(self, temperature, material, time_step):
         # ------------------------------
         # необходимые константы
-        energy_hagb = 1.0E-8
-        angle_limit_hagb = 30.0
-        shear = 4.0e+10
-        burgers_vector = 1.0
-        young_modulus = np.ones(self.number_of_cells, dtype=np.float64) * 0.4e+7
-        c = 10.0
-        boltzmann = 1.38064852e-3
+        angle_limit_hagb = material['Angle Limit HAGB']
+        angle_limit_hagb = 90.0
+        energy_hagb = material['Energy HAGB']
+        energy_hagb = 1.05e-18
+        shear = material['Shear Modulus']
+        burgers_vector = material['Lattice Parameter']
+        boltzmann = const.kB
         # ------------------------------
 
-        current_dislocation_density = np.zeros(self.number_of_cells, dtype=np.float64)
-        prev_dislocation_density = np.zeros(self.number_of_cells, dtype=np.float64)
-
-        random_numbers = np.zeros(self.actual_number_of_grains, dtype=np.float64)
-
-        for i in range(self.actual_number_of_grains):
-            random_numbers[i] = np.random.random()
-
-        for index, grain in enumerate(self.grain_indeces):
-            prev_dislocation_density[index] = random_numbers[grain] * 1.0e+16
-
-        current_dislocation_density[:] = prev_dislocation_density[:]
-
         # вычисляем энергию на границе
-        boundary_energy = np.ones((self.number_of_cells, 26), dtype=np.float64)
+        boundary_energy = np.ones((self.number_of_cells, 6), dtype=np.float64)
 
         for global_id in range(self.number_of_cells):
-            neighbors = self.total_neighbors[global_id]
-            local_boundary_energy = np.zeros(26, dtype=np.float64)
-            orientation_angle = (self.alphas[self.grain_indeces[global_id]] +
-                                 self.betas[self.grain_indeces[global_id]] +
-                                 self.gammas[self.grain_indeces[global_id]]) / 3.0
-
+            neighbors = self.total_neighbors[global_id][:6]
+            local_boundary_energy = np.zeros(6, dtype=np.float64)
             for neighbor_local_id, neighbor_global_id in enumerate(neighbors):
                 if not neighbor_global_id == -1:
                     if self.grain_indeces[global_id] == self.grain_indeces[neighbor_global_id]:
                         local_boundary_energy[neighbor_local_id] = 0.0
                     else:
-                        neighbor_orientation_angle = (self.alphas[self.grain_indeces[neighbor_global_id]] +
-                                                      self.betas[self.grain_indeces[neighbor_global_id]] +
-                                                      self.gammas[self.grain_indeces[neighbor_global_id]]) / 3.0
-                        angle_diff = np.abs(neighbor_orientation_angle - orientation_angle)
-                        local_boundary_energy[neighbor_local_id] = energy_hagb * angle_diff / angle_limit_hagb * \
-                                                                   (1 - np.log(angle_diff / angle_limit_hagb))
-
+                        angle_diff = self.rasorientation_angles[global_id][neighbor_local_id]
+                        local_boundary_energy[neighbor_local_id] = energy_hagb * angle_diff / angle_limit_hagb * (1 - np.log(angle_diff / angle_limit_hagb))
             boundary_energy[global_id] = local_boundary_energy
 
         # вычисляем максимальные значения подвижности
-        max_mobilities = np.zeros((self.number_of_cells, 26), dtype=np.float64)
-
-        for global_id in range(self.number_of_cells):
-            neighbors = self.total_neighbors[global_id]
-            local_max_mobilities = np.zeros(26, dtype=np.float64)
-            for neighbor_local_id, neighbor_global_id in enumerate(neighbors):
-                if not neighbor_global_id == -1:
-                    local_max_mobilities[neighbor_local_id] = c / (
-                            young_modulus[global_id] * young_modulus[neighbor_global_id]) * np.exp(
-                        -(young_modulus[global_id] - young_modulus[neighbor_global_id]) ** 2.0 / (
-                                young_modulus[global_id] * young_modulus[neighbor_global_id]))
-            max_mobilities[global_id] = local_max_mobilities
+        max_mobilities = np.ones((self.number_of_cells, 6), dtype=np.float64) * 1.0e-2
 
         # вычисляем значения подвижностей
-        mobilities = np.zeros((self.number_of_cells, 26), dtype=np.float64)
+        mobilities = np.zeros((self.number_of_cells, 6), dtype=np.float64)
         for global_id in range(self.number_of_cells):
-            neighbors = self.total_neighbors[global_id]
-            local_mobilities = np.zeros(26, dtype=np.float64)
+            neighbors = self.total_neighbors[global_id][:6]
+            local_mobilities = np.zeros(6, dtype=np.float64)
             for neighbor_local_id, neighbor_global_id in enumerate(neighbors):
                 if not neighbor_global_id == -1:
                     boundary_temperature = (temperature[global_id] + temperature[neighbor_global_id]) / 2.0
                     local_mobilities[neighbor_local_id] = max_mobilities[global_id][neighbor_local_id] * \
-                                                          np.exp(-boundary_energy[global_id][
-                                                              neighbor_local_id] / boltzmann / boundary_temperature)
+                                                          (np.exp(-boundary_energy[global_id][neighbor_local_id] / (boltzmann * boundary_temperature)))
             mobilities[global_id] = local_mobilities
 
         # вычисляем значения движущих сил на границе
-        driving_force = np.zeros((self.number_of_cells, 26), dtype=np.float64)
+        driving_force = np.zeros((self.number_of_cells, 6), dtype=np.float64)
         for global_id in range(self.number_of_cells):
-            neighbors = self.total_neighbors[global_id]
-            local_driving_force = np.zeros(26, dtype=np.float64)
+            neighbors = self.total_neighbors[global_id][:6]
+            local_driving_force = np.zeros(6, dtype=np.float64)
             for neighbor_local_id, neighbor_global_id in enumerate(neighbors):
                 if not neighbor_global_id == -1:
-                    local_driving_force[neighbor_local_id] = 1 / 2.0 * (
-                            prev_dislocation_density[neighbor_global_id] - prev_dislocation_density[
-                        global_id]) * shear * burgers_vector ** 2
+                    local_driving_force[neighbor_local_id] = - 1.0e+14 / 2.0 * (
+                            self.prev_dislocation_density[neighbor_global_id] - self.prev_dislocation_density[
+                        global_id]) * shear * (burgers_vector ** 2)
             driving_force[global_id] = local_driving_force
 
         # вычисляем скорости на границе
-        boundary_velocities = np.zeros((self.number_of_cells, 26), dtype=np.float64)
+        boundary_velocities = np.zeros((self.number_of_cells, 6), dtype=np.float64)
 
         for global_id in range(self.number_of_cells):
-            neighbors = self.total_neighbors[global_id]
-            local_boundary_velocities = np.zeros(26, dtype=np.float64)
-            local_mobilities = mobilities[global_id]
-            local_driving_forces = driving_force[global_id]
+            neighbors = self.total_neighbors[global_id][:6]
+            local_boundary_velocities = np.zeros(6, dtype=np.float64)
             for neighbor_local_id, neighbor_global_id in enumerate(neighbors):
                 if not neighbor_global_id == -1:
-                    local_boundary_velocities[neighbor_local_id] = local_mobilities[neighbor_local_id] * \
-                                                                   local_driving_forces[neighbor_local_id]
+                    local_boundary_velocities[neighbor_local_id] = mobilities[global_id][neighbor_local_id] * \
+                                                                   driving_force[global_id][neighbor_local_id]
             boundary_velocities[global_id] = local_boundary_velocities
 
-        print('RECRYSTALLIZATION TEST:')
-        print(f'Boundary Energy: {np.average(boundary_energy)}')
-        print(f'Max Mobilities: {np.average(max_mobilities)}')
-        print(f'Mobilities: {np.average(mobilities)}')
-        print(f'Driving Force: {np.average(driving_force)}')
-        print(f'Boundary Velocity: {np.average(boundary_velocities)}')
+        # print('RECRYSTALLIZATION TEST:')
+        # print(f'Boundary Energy: {np.average(boundary_energy)}')
+        # print(f'Mobilities: {np.average(mobilities)}')
+        # print(f'Driving Force: {np.max(driving_force)}')
+        # print(f'Boundary Velocity: {np.min(boundary_velocities)}')
 
-        max_driving_force = np.max(current_dislocation_density)/2.0 * shear * burgers_vector ** 2.0
-        max_velocity = mobilities * max_driving_force
+        probabilities = np.zeros((self.number_of_cells, 6), dtype=np.float64)
+        # считаем вероятности по всем для каждого элемента
+        for global_id in range(self.number_of_cells):
+            neighbors = self.total_neighbors[global_id][:6]
+            for neighbor_local_id, neighbor_global_id in enumerate(neighbors):
+                probabilities[global_id][neighbor_local_id] = boundary_velocities[global_id][neighbor_local_id] * \
+                                                              time_step / self.cell_size
+
+        if np.max(probabilities) > 1.0:
+            print(f'Max probability is over 1.0 : {np.max(probabilities)}')
+            input()
+
+        nucleation_counter = 0
+
+        for global_id in range(self.number_of_cells):
+            neighbors = self.total_neighbors[global_id][:6]
+            gr_arr = []
+            probs_arr = []
+            for neighbor_local_id, neighbor_global_id in enumerate(neighbors):
+                q = np.random.random()
+                if 0.5 - probabilities[global_id][neighbor_local_id] < q < 0.5 + probabilities[global_id][
+                    neighbor_local_id]:
+                    gr_arr.append(self.grain_indeces[neighbor_global_id])
+                    probs_arr.append(probabilities[global_id][neighbor_local_id])
+
+            if len(gr_arr) > 0:
+                index_ = np.argmax(probs_arr)
+                self.grain_indeces[global_id] = gr_arr[index_]
+                self.current_dislocation_density[global_id] = self.prev_dislocation_density[index_]
+                nucleation_counter += 1
+
+        print(f'Number of Nucleation : {nucleation_counter}')
+        print(f'Check : {self.current_dislocation_density == self.prev_dislocation_density}')
+        self.current_dislocation_density[:] = self.prev_dislocation_density[:]
+        print(self.grain_indeces)
+        print(self.current_dislocation_density)
+        input()
 
     def get_coordinates(self):
         """
@@ -589,7 +594,7 @@ class CellularAutomaton:
         j = triple_index[1]
         k = triple_index[2]
 
-        return radius*i, radius*j, radius*k
+        return radius * i, radius * j, radius * k
 
 
 def random_color(size):

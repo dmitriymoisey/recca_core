@@ -1,9 +1,9 @@
 import sqlite3 as sqlite
-import sys
-
+import DBCommon
 
 class DBUtils:
     def __init__(self):
+
         self.db_name = "TEST.db"
 
         try:
@@ -19,8 +19,6 @@ class DBUtils:
 
     def read_db(self, specimen_name):
 
-        data = {}
-
         try:
             self.cursor.execute(f"""SELECT * FROM specimens WHERE name='{specimen_name}';""")
         except sqlite.DatabaseError as err:
@@ -30,20 +28,15 @@ class DBUtils:
             print('Reading Specimen Data from Database...')
         result = self.cursor.fetchall()
 
-        data['Specimen Name'] = result[0][1]
-        data['Material'] = result[0][2]
-        data['Cell Number X'] = result[0][3]
-        data['Cell Number Y'] = result[0][4]
-        data['Cell Number Z'] = result[0][5]
-        data['Number Of Grains'] = result[0][6]
-        data['Angle Range'] = result[0][7]
-        data['Initial Conditions'] = result[0][8]
-        data['Boundary Conditions'] = result[0][9]
-        data['Task'] = result[0][10]
+        data = {'Specimen Name': result[0][0], 'Cell Number X': result[0][1], 'Cell Number Y': result[0][2],
+                'Cell Number Z': result[0][3], 'Cell Size': result[0][4], 'Number Of Grains': result[0][5],
+                'Angle Range': result[0][6], DBCommon.TYPE_OF_GRAIN_DISTRIB: result[0][7],
+                'Material': result[0][8], 'Initial Conditions': result[0][9],
+                'Boundary Conditions': result[0][10], 'Task': result[0][11]}
 
         # считываем информацию о материале
         try:
-            self.cursor.execute(f"""SELECT * FROM materials WHERE Name='{data['Material']}'""")
+            self.cursor.execute(f"""SELECT * FROM {DBCommon.MATERIALS} WHERE {DBCommon.NAME}='{data['Material']}'""")
         except sqlite.DatabaseError as err:
             print(err)
             print('Failed to read material table')
@@ -52,17 +45,10 @@ class DBUtils:
 
         result = self.cursor.fetchall()[0]
 
-        material_data = {}
-        material_data['Name'] = result[1]
-        material_data['Heat Conductivity'] = result[2]
-        material_data['Density'] = result[3]
-        material_data['Heat Expansion'] = result[4]
-        material_data['Heat Capacity'] = result[5]
-        material_data['Phonon Portion'] = result[6]
-        material_data['Angle Limit HAGB'] = result[7]
-        material_data['Energy HAGB'] = result[8]
-        material_data['Max. Mobility'] = result[9]
-        material_data['Lattice Parameter'] = result[10]
+        material_data = {'Name': result[0], 'Heat Conductivity': result[1], 'Density': result[2],
+                         'Heat Expansion': result[3], 'Heat Capacity': result[4], 'Phonon Portion': result[5],
+                         'Angle Limit HAGB': result[6], 'Energy HAGB': result[7], 'Max. Mobility': result[8],
+                         'Lattice Parameter': result[9], 'Shear Modulus': result[11]}
 
         # считываем информацию о начальных условиях
         init_cond_table_name = f"{specimen_name}_InitialCondition"
@@ -76,17 +62,12 @@ class DBUtils:
 
         result = self.cursor.fetchall()[0]
 
-        initial_condition_data = {}
-        initial_condition_data['Name'] = result[1]
-        initial_condition_data['Temperature'] = result[2]
-        initial_condition_data['Elastic Energy'] = result[3]
-        initial_condition_data['Dislocation Density'] = result[4]
-        initial_condition_data['Moment X'] = result[5]
-        initial_condition_data['Moment Y'] = result[6]
-        initial_condition_data['Moment Z'] = result[7]
+        initial_condition_data = {'Name': result[0], 'Temperature': result[1], 'Elastic Energy': result[2],
+                                  'Dislocation Density': result[3], 'Moment X': result[4], 'Moment Y': result[5],
+                                  'Moment Z': result[6]}
 
         # считываем информацию о граничных условиях
-        bound_cond_table_name = f"{specimen_name}_BoundaryConditions_{data['Boundary Conditions']}"
+        bound_cond_table_name = f"{specimen_name}_BoundaryCondition"
         try:
             self.cursor.execute(f"""SELECT * FROM {bound_cond_table_name}""")
         except sqlite.DatabaseError as err:
@@ -98,29 +79,18 @@ class DBUtils:
         boundary_condition_data = []
 
         for row in self.cursor.fetchall():
-            facet_data = {}
-
-            facet_data['Facet'] = row[1]
-            facet_data['Temperature Average'] = row[2]
-            facet_data['Temperature Deviation'] = row[3]
-            facet_data['Temperature Load Time'] = row[4]
-            facet_data['Elastic Energy Average'] = row[5]
-            facet_data['Elastic Energy Deviation'] = row[6]
-            facet_data['Elastic Energy Load Time'] = row[7]
-            facet_data['Dislocation Density Average'] = row[8]
-            facet_data['Dislocation Density Deviation'] = row[9]
-            facet_data['Dislocation Density Load Time'] = row[10]
-            facet_data['Moment X Average'] = row[11]
-            facet_data['Moment X Deviation'] = row[12]
-            facet_data['Moment X Load Time'] = row[13]
-            facet_data['Moment Y Average'] = row[14]
-            facet_data['Moment Y Deviation'] = row[15]
-            facet_data['Moment Y Load Time'] = row[16]
-            facet_data['Moment Z Average'] = row[17]
-            facet_data['Moment Z Deviation'] = row[18]
-            facet_data['Moment Z Load Time'] = row[19]
+            facet_data = {'Facet': row[1], 'Temperature Average': row[2], 'Temperature Deviation': row[3],
+                          'Temperature Load Time': row[4], 'Elastic Energy Average': row[5],
+                          'Elastic Energy Deviation': row[6], 'Elastic Energy Load Time': row[7],
+                          'Dislocation Density Average': row[8], 'Dislocation Density Deviation': row[9],
+                          'Dislocation Density Load Time': row[10], 'Moment X Average': row[11],
+                          'Moment X Deviation': row[12], 'Moment X Load Time': row[13], 'Moment Y Average': row[14],
+                          'Moment Y Deviation': row[15], 'Moment Y Load Time': row[16], 'Moment Z Average': row[17],
+                          'Moment Z Deviation': row[18], 'Moment Z Load Time': row[19]}
 
             boundary_condition_data.append(facet_data)
+
+        print(boundary_condition_data)
 
         # считываем информацию о параметрах задачи
         task_table_name = f"{specimen_name}_Task"
@@ -134,11 +104,7 @@ class DBUtils:
 
         result = self.cursor.fetchall()[0]
 
-        task_data = {}
-
-        task_data['Name'] = result[1]
-        task_data['Time Step'] = result[2]
-        task_data['Total Time'] = result[3]
+        task_data = {'Name': result[0], 'Time Step': result[1], 'Total Time': result[2]}
 
         data['Material'] = material_data
         data['Initial Conditions'] = initial_condition_data
@@ -151,7 +117,7 @@ class DBUtils:
         table_name = f"{specimen_name}_{task_name}"
         query = f"""
         CREATE TABLE IF NOT EXISTS {table_name}
-        ('TimeStep' INT);
+        ({DBCommon.TIME_STEP} INT);
         """
 
         try:
@@ -176,16 +142,15 @@ class DBUtils:
             print('Time Step is added to database')
             self.connection.commit()
 
-
         table_name = f"{specimen_name}_{task_name}_{time_step}"
         create_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_name}
-        ('LocationType' INT,
-        'GrainIndex' INT,
-        'CoordinateX' REAL, 
-        'CoordinateY' REAL, 
-        'CoordinateZ' REAL,
-        'Temperature' REAL);
+        ({DBCommon.LOCATION_TYPE} INT,
+        {DBCommon.GRAIN_INDEX} INT,
+        {DBCommon.COORDINATE_X} REAL, 
+        {DBCommon.COORDINATE_Y} REAL, 
+        {DBCommon.COORDINATE_Z} REAL,
+        {DBCommon.TEMPERATURE} REAL);
         """
 
         try:
@@ -215,16 +180,17 @@ class DBUtils:
         else:
             print(f'{time_step} is added to database')
 
-
     def write_structure_data_to_db(self, specimen_name, location_types, grain_indices,
                                    x_coords, y_coords, z_coords, number_of_cells):
 
         table_name = f"{specimen_name}_StructureData"
         create_structure_table_query = f"""
         CREATE TABLE IF NOT EXISTS {table_name}
-        ('LocationType' INT,
-        'GrainIndex' INT,
-        'CoordinateX' REAL, 'CoordinateY' REAL, 'CoordinateZ' REAL);
+        ({DBCommon.LOCATION_TYPE} INT,
+        {DBCommon.GRAIN_INDEX} INT,
+        {DBCommon.COORDINATE_X} REAL, 
+        {DBCommon.COORDINATE_Y} REAL, 
+        {DBCommon.COORDINATE_Z} REAL);
 		"""
 
         try:
@@ -251,3 +217,27 @@ class DBUtils:
             self.cursor.execute(query)
 
         self.connection.commit()
+        print('Done writing structure to Database')
+
+    def read_structure_db(self, specimen_name):
+        table_name = f"{specimen_name}_StructureData"
+        sql_query = f"""SELECT * FROM {table_name}"""
+        self.cursor.execute(sql_query)
+        location_type = []
+        grain_index = []
+        x_coords = []
+        y_coords = []
+        z_coords = []
+        for row in self.cursor.fetchall():
+            location_type.append(row[0])
+            grain_index.append(row[1])
+            x_coords.append(row[2])
+            y_coords.append(row[3])
+            z_coords.append(row[4])
+
+        return {'Location Type': location_type,
+                'Grain Index': grain_index,
+                'X Coords': x_coords,
+                'Y Coords': y_coords,
+                'Z Coords': z_coords}
+

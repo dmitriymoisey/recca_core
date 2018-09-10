@@ -1,17 +1,15 @@
 import sys
-import matplotlib.pyplot as plt
 from task import Task
-from utils.check_utils import check_task_name
 
 task_name = sys.argv[-1]
 specimen_name = sys.argv[-2]
 
 task = Task(specimen_name=specimen_name,
-                task_name=task_name)
+            task_name=task_name)
+
 print(task)
 task.cpu_start()
 
-from recca_io.read import read_res
 from interf.plot_builder import show_temperature_distribution
 
 # data1 = read_res('task1_100.res')
